@@ -182,6 +182,54 @@
   color: #e23744;
 }
 
+.notifyStatus {
+  font-size: 12px;
+  color: #7c8b9b;
+  background: #131a22;
+  border: 1px solid #26313d;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+.notifyStatusOn {
+  color: #3ecf8e;
+}
+.notifyStatusOn strong {
+  color: #edf2f7;
+}
+
+.bellBtn {
+  background: #1b242e;
+  border: 1px solid #26313d;
+  color: #7c8b9b;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bellBtnOn {
+  background: rgba(62, 207, 142, 0.15);
+  border-color: #3ecf8e;
+}
+.rowRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.credit {
+  margin-top: 10px;
+  color: #3a4652;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
 .board {
   background: #0d1216;
   border: 1px solid #26313d;
