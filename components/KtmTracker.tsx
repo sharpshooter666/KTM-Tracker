@@ -49,9 +49,11 @@ export default function KtmTracker() {
   const [originIdx, setOriginIdx] = useState(DEFAULT_ORIGIN);
   const [destIdx, setDestIdx] = useState(DEFAULT_DEST);
   const [forceHoliday, setForceHoliday] = useState(false);
-  const [notifyOn, setNotifyOn] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">("default");
-  const lastNotifiedDep = useRef<number | null>(null);
+  // The specific train the user picked to be reminded about, identified by its departure
+  // time in minutes-since-midnight. null = no train selected yet.
+  const [selectedDep, setSelectedDep] = useState<number | null>(null);
+  const firedForDep = useRef<number | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -80,66 +82,83 @@ export default function KtmTracker() {
   const originName = STATIONS[originIdx];
   const destName = STATIONS[destIdx];
 
-  // Fire a local notification 15 minutes before the next departure.
+  const selectedTrip = selectedDep != null ? upcoming.find((t) => t.dep === selectedDep) ?? null : null;
+
+  // Clear the selection once the chosen train has departed.
   useEffect(() => {
-    if (!notifyOn || !next) return;
-    const remaining = Math.round(next.dep - nowMin);
-    if (remaining === 15 && lastNotifiedDep.current !== next.dep) {
-      lastNotifiedDep.current = next.dep;
+    if (selectedDep != null && !selectedTrip) {
+      setSelectedDep(null);
+      firedForDep.current = null;
+    }
+  }, [selectedDep, selectedTrip]);
+
+  // Fire a local notification 15 minutes before the SELECTED train's departure.
+  useEffect(() => {
+    if (!selectedTrip || permission !== "granted") return;
+    const remaining = Math.round(selectedTrip.dep - nowMin);
+    if (remaining === 15 && firedForDep.current !== selectedTrip.dep) {
+      firedForDep.current = selectedTrip.dep;
       try {
         new Notification("Tren dalam 15 minit 🚆", {
-          body: `${originName} → ${destName} · berlepas ${next.depStr}`,
+          body: `${originName} → ${destName} · berlepas ${selectedTrip.depStr}`,
           icon: "/icons/icon-192.png",
         });
       } catch {
         // ignore
       }
     }
-  }, [nowMin, notifyOn, next, originName, destName]);
+  }, [nowMin, selectedTrip, permission, originName, destName]);
 
   function handleSwap() {
     setOriginIdx(destIdx);
     setDestIdx(originIdx);
-    lastNotifiedDep.current = null;
+    setSelectedDep(null);
+    firedForDep.current = null;
   }
 
   function handleReset() {
     setOriginIdx(DEFAULT_ORIGIN);
     setDestIdx(DEFAULT_DEST);
-    lastNotifiedDep.current = null;
+    setSelectedDep(null);
+    firedForDep.current = null;
   }
 
-  async function handleNotifyClick() {
+  async function handleSelectTrain(dep: number) {
     if (typeof window === "undefined" || !("Notification" in window)) return;
+
+    // Toggle off if this train is already selected.
+    if (selectedDep === dep) {
+      setSelectedDep(null);
+      firedForDep.current = null;
+      return;
+    }
+
     if (Notification.permission === "denied") {
       setPermission("denied");
       return;
     }
-    if (notifyOn) {
-      setNotifyOn(false);
-      return;
+    if (Notification.permission !== "granted") {
+      const perm = await Notification.requestPermission();
+      setPermission(perm);
+      if (perm !== "granted") return;
     }
-    const perm = await Notification.requestPermission();
-    setPermission(perm);
-    if (perm === "granted") {
-      setNotifyOn(true);
-      lastNotifiedDep.current = null;
-      new Notification("KTM Tracker", {
-        body: "Ingatan diaktifkan — anda akan diberitahu 15 minit sebelum tren berlepas.",
-      });
-    }
+    firedForDep.current = null;
+    setSelectedDep(dep);
   }
 
-  let notifyBtnClass = styles.notifyBtn;
-  let notifyBtnText = "🔔 Ingatkan saya 15 minit sebelum tren";
-  if (permission === "unsupported") {
-    notifyBtnText = "🔕 Notifikasi tidak disokong pelayar ini";
-  } else if (permission === "granted" && notifyOn) {
-    notifyBtnClass = `${styles.notifyBtn} ${styles.notifyBtnOn}`;
-    notifyBtnText = "🔔 Ingatan 15 minit: AKTIF";
-  } else if (permission === "denied") {
-    notifyBtnClass = `${styles.notifyBtn} ${styles.notifyBtnDenied}`;
-    notifyBtnText = "🔕 Notifikasi disekat";
+  function BellButton({ dep }: { dep: number }) {
+    const active = selectedDep === dep;
+    return (
+      <button
+        className={`${styles.bellBtn} ${active ? styles.bellBtnOn : ""}`}
+        onClick={() => handleSelectTrain(dep)}
+        type="button"
+        title={active ? "Batalkan ingatan" : "Ingatkan saya 15 minit sebelum tren ini"}
+        disabled={permission === "unsupported"}
+      >
+        {active ? "🔔" : "🔕"}
+      </button>
+    );
   }
 
   return (
@@ -206,9 +225,17 @@ export default function KtmTracker() {
         </div>
       </div>
 
-      <button className={notifyBtnClass} onClick={handleNotifyClick} type="button" disabled={permission === "unsupported"}>
-        {notifyBtnText}
-      </button>
+      <div className={styles.notifyStatus}>
+        {permission === "unsupported" ? (
+          <span>🔕 Notifikasi tidak disokong pelayar ini</span>
+        ) : selectedTrip ? (
+          <span className={styles.notifyStatusOn}>
+            🔔 Ingatan aktif untuk tren <strong>{selectedTrip.depStr}</strong> — ketik 🔔 pada tren itu untuk batal
+          </span>
+        ) : (
+          <span>🔕 Ketik loceng pada mana-mana tren di bawah untuk diingatkan 15 minit sebelum ia berlepas</span>
+        )}
+      </div>
 
       {permission === "denied" && (
         <div className={styles.errorNote}>
@@ -233,7 +260,12 @@ export default function KtmTracker() {
         ) : (
           next && (
             <>
-              <div className={styles.boardLabel}>🕐 Berlepas Dalam</div>
+              <div className={styles.boardLabel}>
+                <span>🕐 Berlepas Dalam</span>
+                <span style={{ marginLeft: "auto" }}>
+                  <BellButton dep={next.dep} />
+                </span>
+              </div>
               <div className={styles.countdownWrap}>
                 <FlapNumber text={pad(Math.min(Math.max(0, Math.ceil(next.dep - nowMin)), 99))} />
                 <span className={styles.countdownUnit}>MINIT</span>
@@ -278,9 +310,12 @@ export default function KtmTracker() {
                   <span className={styles.arrow}>&rarr;</span>
                   <span>{t.arrStr}</span>
                 </div>
-                <span className={styles.rowTag}>
-                  dalam {minutesLabel(Math.max(0, Math.ceil(t.dep - nowMin)))}
-                </span>
+                <div className={styles.rowRight}>
+                  <span className={styles.rowTag}>
+                    dalam {minutesLabel(Math.max(0, Math.ceil(t.dep - nowMin)))}
+                  </span>
+                  <BellButton dep={t.dep} />
+                </div>
               </div>
             ))}
           </div>
@@ -293,6 +328,7 @@ export default function KtmTracker() {
         Nota: cuti umum tidak dikesan automatik &mdash; guna suis &quot;Cuti Umum&quot; di atas.
         <br />
         KTM Komuter &middot; Laluan Tanjung Malim &ndash; Pelabuhan Klang
+        <div className={styles.credit}>Developed by Akmal Amin</div>
       </div>
     </div>
   );
